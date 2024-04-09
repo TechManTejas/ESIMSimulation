@@ -1,34 +1,75 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
+import { ExpressPeerServer } from "peer";
+import cors from "cors";
 
+// App for Socket.IO
 const app = express();
 const server = createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+  },
+});
 
-const users = {};
+// Separate app for PeerJS
+const peerApp = express();
+const peerServer = createServer(peerApp);
+const peerPort = 9000; // Different port for PeerJS
+
+// PeerJS server
+const peerExpressServer = ExpressPeerServer(peerServer, {
+  debug: true,
+  path: "/", // Default path
+});
+
+peerApp.use("/peerjs", peerExpressServer); // Mount PeerJS server on '/peerjs' path
+
+// CORS middleware
+app.use(cors());
+
+// Socket.IO server
+let users = {}; // Store users with their socket IDs
 
 io.on("connection", (socket) => {
-  users[socket.id] = { userId: socket.id };
-  io.emit("users", Object.values(users));
+  console.log("A user connected: " + socket.id);
+
+  socket.on("new-user", (userId) => {
+    users[socket.id] = userId;
+    io.emit("all-users", users);
+  });
+
+  socket.on("call-user", ({ userToCall, from }) => {
+    io.to(getSocketId(userToCall)).emit("call-made", {
+      from,
+      signal: userToCall.signal,
+    });
+  });
+
+  socket.on("make-answer", (data) => {
+    io.to(getSocketId(data.to)).emit("answer-made", {
+      socket: socket.id,
+      signal: data.signal,
+    });
+  });
 
   socket.on("disconnect", () => {
     delete users[socket.id];
-    io.emit("users", Object.values(users));
+    io.emit("all-users", users);
   });
 
-  socket.on("call-user", (data) => {
-    io.to(data.target).emit("offer", { from: data.from, sdp: data.sdp });
-  });
-
-  socket.on("accept-call", (data) => {
-    io.to(data.target).emit("answer", { sdp: data.sdp });
-  });
-
-  socket.on("send-candidate", (data) => {
-    io.to(data.target).emit("candidate", data.candidate);
-  });
+  function getSocketId(userId) {
+    return Object.keys(users).find((key) => users[key] === userId);
+  }
 });
 
-const PORT = 3001;
-server.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
+const PORT = process.env.PORT || 3000;
+
+server.listen(PORT, () => {
+  console.log(`Socket.IO Server running on port ${PORT}`);
+});
+
+peerServer.listen(peerPort, "0.0.0.0", () => {
+  console.log(`PeerJS Server running on port ${peerPort}`);
+});

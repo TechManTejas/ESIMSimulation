@@ -1,118 +1,111 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import io from "socket.io-client";
+import Peer from "peerjs";
 
-const App = () => {
-  const userVideo = useRef();
-  const partnerVideo = useRef();
-  const socket = useRef();
-  const peerRef = useRef();
-  const [users, setUsers] = useState([]);
-  const [incomingCall, setIncomingCall] = useState(null);
+const SERVER_URL = "http://192.168.1.111:3000/";
+const PEER_SERVER_HOST = "/";
+const PEER_SERVER_PORT = "9000";
+const socket = io(SERVER_URL, {
+  transports: ["websocket"], // Force WebSocket
+});
+
+function App() {
+  const [users, setUsers] = useState({});
+  const myId = useRef("");
+  const myVideoStream = useRef(null);
+  const peerRef = useRef(null);
   const [callAccepted, setCallAccepted] = useState(false);
 
-  function getUserMedia() {
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then((stream) => {
-        if (userVideo.current) userVideo.current.srcObject = stream;
-        stream.getTracks().forEach((track) => {
-          peerRef.current.addTrack(track, stream);
-        });
-      }).catch((e) => {
-        console.error("getUserMedia Error: ", e);
-      });
-  }
-
   useEffect(() => {
-    socket.current = io.connect("http://localhost:3001");
-    getUserMedia()
+    // Request permissions and get the stream
+    navigator.mediaDevices.getUserMedia({ video: false, audio: true })
+    .then(stream => {
+      myVideoStream.current = stream;
 
-    socket.current.on("users", (users) => {
-      setUsers(users.filter((user) => user.userId !== socket.current.id));
+      peerRef.current = new Peer(undefined, {
+        path: '/peerjs',
+        host: PEER_SERVER_HOST,
+        port: PEER_SERVER_PORT,
+      });
+
+      peerRef.current.on('open', id => {
+        myId.current = id;
+        socket.emit('new-user', id);
+      });
+
+      peerRef.current.on('call', call => {
+        call.answer(stream); // Answer the call with an audio stream.
+        call.on('stream', userVideoStream => {
+          // Here, you should also prepare to receive the stream.
+          addAudioStream(userVideoStream);
+        });
+      });
+
+      socket.on('call-made', async data => {
+        if (!callAccepted) {
+          const confirmed = window.confirm(`User ${data.from} is calling you. Accept this call?`);
+          if (confirmed) {
+            const call = peerRef.current.call(data.from, stream);
+            call.on('stream', userVideoStream => {
+              // Same here, prepare to receive the stream.
+              addAudioStream(userVideoStream);
+            });
+            setCallAccepted(true);
+            socket.emit('make-answer', {
+              to: data.from,
+              signal: data.signal,
+            });
+          }
+        }
+      });
     });
 
-    socket.current.on("offer", (incoming) => {
-      setIncomingCall({ from: incoming.from, sdp: incoming.sdp });
+    socket.on("all-users", (currentUsers) => {
+      setUsers(currentUsers);
     });
 
-    socket.current.on("answer", (message) => {
-      peerRef.current.setRemoteDescription(new RTCSessionDescription(message.sdp));
-    });
-
-    socket.current.on("candidate", (incoming) => {
-      const candidate = new RTCIceCandidate(incoming);
-      peerRef.current.addIceCandidate(candidate);
-    });
-
-    const configuration = { iceServers: [{ urls: "stun:stun.stunprotocol.org" }] };
-    peerRef.current = new RTCPeerConnection(configuration);
-
-    peerRef.current.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.current.emit("send-candidate", { candidate: event.candidate });
+    return () => {
+      if (myVideoStream.current) {
+        myVideoStream.current.getTracks().forEach((track) => track.stop());
+      }
+      socket.disconnect();
+      if (peerRef.current) {
+        peerRef.current.destroy();
       }
     };
+  }, [callAccepted]);
 
-    peerRef.current.ontrack = (event) => {
-      partnerVideo.current.srcObject = event.streams[0];
-    };
-
-    peerRef.current.oniceconnectionstatechange = () => {
-      console.log(`ICE connection state: ${peerRef.current.iceConnectionState}`);
-    };
-  }, []);
-
-  function callUser(targetId) {
-    peerRef.current.createOffer().then((offer) => {
-      return peerRef.current.setLocalDescription(offer);
-    }).then(() => {
-      const payload = {
-        target: targetId,
-        from: socket.current.id,
-        sdp: peerRef.current.localDescription,
-      };
-      socket.current.emit("call-user", payload);
-    });
+  /// This is a new function to handle adding audio streams to the DOM.
+  function addAudioStream(stream) {
+    const audio = document.createElement("audio");
+    audio.srcObject = stream;
+    document.body.appendChild(audio);
+    audio.play();
   }
 
-  function acceptCall() {
+  // Ensure callUser function uses updated logic to handle two-way communication properly.
+  const callUser = (userId) => {
+    const call = peerRef.current.call(userId, myVideoStream.current);
+    call.on("stream", (userStream) => {
+      // This ensures the caller can also receive the callee's audio stream.
+      addAudioStream(userStream);
+    });
     setCallAccepted(true);
-    const desc = new RTCSessionDescription(incomingCall.sdp);
-    peerRef.current.setRemoteDescription(desc).then(() => {
-      return navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    }).then((stream) => {
-      stream.getTracks().forEach((track) => peerRef.current.addTrack(track, stream));
-    }).then(() => {
-      return peerRef.current.createAnswer();
-    }).then((answer) => {
-      return peerRef.current.setLocalDescription(answer);
-    }).then(() => {
-      const payload = {
-        target: incomingCall.from,
-        sdp: peerRef.current.localDescription,
-      };
-      socket.current.emit("accept-call", payload);
-    });
-  }
+  };
 
   return (
     <div>
-      <video autoPlay ref={userVideo} muted />
-      <video autoPlay ref={partnerVideo} />
-      {incomingCall && !callAccepted && (
-        <div>
-          <h2>Incoming call from {incomingCall.from}</h2>
-          <button onClick={acceptCall}>Accept</button>
-        </div>
+      <h2>Voice Calling App</h2>
+      {Object.keys(users).map(
+        (socketId) =>
+          users[socketId] !== myId.current && (
+            <button key={socketId} onClick={() => callUser(users[socketId])}>
+              Call {users[socketId]}
+            </button>
+          )
       )}
-      <div>
-        {users.map((user) => (
-          <button key={user.userId} onClick={() => callUser(user.userId)}>
-            Call {user.userId}
-          </button>
-        ))}
-      </div>
     </div>
   );
-};
+}
 
 export default App;
