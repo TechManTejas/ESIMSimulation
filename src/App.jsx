@@ -1,13 +1,16 @@
 import { useEffect, useState, useRef } from "react";
 import io from "socket.io-client";
 import Peer from "peerjs";
+import { confirmation } from "./components/Confirmation";
 
 const SERVER_URL = "http://192.168.1.111:3000/";
 const PEER_SERVER_HOST = "/";
 const PEER_SERVER_PORT = "9000";
 const socket = io(SERVER_URL, {
-  transports: ["websocket"], // Force WebSocket
+  transports: ["websocket"], 
 });
+
+let user_id = null
 
 function App() {
   const [users, setUsers] = useState({});
@@ -18,51 +21,59 @@ function App() {
 
   useEffect(() => {
     // Request permissions and get the stream
-    navigator.mediaDevices.getUserMedia({ video: false, audio: true })
-    .then(stream => {
-      myVideoStream.current = stream;
+    navigator.mediaDevices
+      .getUserMedia({ video: false, audio: true })
+      .then((stream) => {
+        myVideoStream.current = stream;
 
-      peerRef.current = new Peer(undefined, {
-        path: '/peerjs',
-        host: PEER_SERVER_HOST,
-        port: PEER_SERVER_PORT,
-      });
-
-      peerRef.current.on('open', id => {
-        myId.current = id;
-        socket.emit('new-user', id);
-      });
-
-      peerRef.current.on('call', call => {
-        call.answer(stream); // Answer the call with an audio stream.
-        call.on('stream', userVideoStream => {
-          // Here, you should also prepare to receive the stream.
-          addAudioStream(userVideoStream);
+        peerRef.current = new Peer(undefined, {
+          path: "/peerjs",
+          host: PEER_SERVER_HOST,
+          port: PEER_SERVER_PORT,
         });
-      });
 
-      socket.on('call-made', async data => {
-        if (!callAccepted) {
-          const confirmed = window.confirm(`User ${data.from} is calling you. Accept this call?`);
-          if (confirmed) {
-            const call = peerRef.current.call(data.from, stream);
-            call.on('stream', userVideoStream => {
-              // Same here, prepare to receive the stream.
-              addAudioStream(userVideoStream);
-            });
-            setCallAccepted(true);
-            socket.emit('make-answer', {
-              to: data.from,
-              signal: data.signal,
+        peerRef.current.on("open", (id) => {
+          myId.current = id;
+          socket.emit("new-user", id);
+        });
+
+        peerRef.current.on("call", (call) => {
+          call.answer(stream);
+          call.on("stream", (userVideoStream) => {
+            addAudioStream(userVideoStream);
+          });
+        });
+
+        socket.on("call-made", async (data) => {
+          if (!callAccepted) {
+            confirmation(
+              `User ${data.from} is calling you. Accept this call?`
+            ).then((confirmed) => {
+              if (confirmed) {
+
+                socket.emit("accept-call", {
+                  to: data.from,
+                  from: myId.current,
+                });
+
+                // setCallAccepted(true);
+              }
             });
           }
-        }
-      });
-    });
+        });
 
-    socket.on("all-users", (currentUsers) => {
-      setUsers(currentUsers);
-    });
+        socket.on("call-accepted", (data) => {
+          const call = peerRef.current.call(data.from, myVideoStream.current);
+          call.on("stream", (userVideoStream) => {
+            addAudioStream(userVideoStream);
+          });
+          setCallAccepted(true);
+        });
+
+        socket.on("all-users", (currentUsers) => {
+          setUsers(currentUsers);
+        });
+      });
 
     return () => {
       if (myVideoStream.current) {
@@ -73,6 +84,30 @@ function App() {
         peerRef.current.destroy();
       }
     };
+  }, []);
+
+  // Ensure callUser function uses updated logic to handle two-way communication properly.
+  const callUser = (userId) => {
+    user_id = userId
+    console.log("CALLING");
+    if (myVideoStream.current) {
+      socket.emit("call-user", {
+        userToCall: userId,
+        from: myId.current,
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (callAccepted) {
+      console.log(user_id)
+      // Create a call to the specified user
+      const call = peerRef.current.call(user_id, myVideoStream.current);
+      call.on("stream", (userStream) => {
+        // This ensures the caller can also receive the callee's audio stream.
+        addAudioStream(userStream);
+      });
+    }
   }, [callAccepted]);
 
   /// This is a new function to handle adding audio streams to the DOM.
@@ -83,19 +118,10 @@ function App() {
     audio.play();
   }
 
-  // Ensure callUser function uses updated logic to handle two-way communication properly.
-  const callUser = (userId) => {
-    const call = peerRef.current.call(userId, myVideoStream.current);
-    call.on("stream", (userStream) => {
-      // This ensures the caller can also receive the callee's audio stream.
-      addAudioStream(userStream);
-    });
-    setCallAccepted(true);
-  };
-
   return (
     <div>
-      <h2>Voice Calling App</h2>
+      <h2>E Sim</h2>
+      <h3>{myId.current}</h3>
       {Object.keys(users).map(
         (socketId) =>
           users[socketId] !== myId.current && (

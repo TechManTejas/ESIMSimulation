@@ -47,10 +47,9 @@ io.on("connection", (socket) => {
     });
   });
 
-  socket.on("make-answer", (data) => {
-    io.to(getSocketId(data.to)).emit("answer-made", {
-      socket: socket.id,
-      signal: data.signal,
+  socket.on("accept-call", data => {
+    io.to(getSocketId(data.to)).emit("call-accepted", {
+      from: socket.id,
     });
   });
 
@@ -66,7 +65,7 @@ io.on("connection", (socket) => {
 
 const PORT = process.env.PORT || 3000;
 
-server.listen(PORT, () => {
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`Socket.IO Server running on port ${PORT}`);
 });
 
