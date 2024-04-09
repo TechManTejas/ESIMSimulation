@@ -2,6 +2,10 @@ import { useEffect, useState, useRef } from "react";
 import io from "socket.io-client";
 import Peer from "peerjs";
 import { confirmation } from "./components/Confirmation";
+import { Button, Modal } from "antd";
+import { Form } from "antd";
+import { Input } from "antd";
+import { message } from "antd";
 
 const SERVER_URL = "http://192.168.1.111:3000/";
 const PEER_SERVER_HOST = "/";
@@ -13,11 +17,14 @@ const socket = io(SERVER_URL, {
 let user_id = null
 
 function App() {
+
+  const [username, setUsername] = useState("");
   const [users, setUsers] = useState({});
   const myId = useRef("");
   const myVideoStream = useRef(null);
   const peerRef = useRef(null);
   const [callAccepted, setCallAccepted] = useState(false);
+  const [isModalVisible, setIsModalVisible] = useState(false);
 
   useEffect(() => {
     // Request permissions and get the stream
@@ -42,6 +49,19 @@ function App() {
           call.on("stream", (userVideoStream) => {
             addAudioStream(userVideoStream);
           });
+        });
+
+        socket.on("auth", (data) => {
+          console.log(data.message); // Log the messa
+          setIsModalVisible(true);
+          // Show modal here for login or registration
+          
+        });
+
+        socket.on("login-success", (data) => {
+          console.log(data.message);
+          setUsername(data.username);
+          setIsModalVisible(false); 
         });
 
         socket.on("call-made", async (data) => {
@@ -73,6 +93,14 @@ function App() {
         socket.on("all-users", (currentUsers) => {
           setUsers(currentUsers);
         });
+
+        socket.on("disconnected", (data) => {
+          message.error(data.message); 
+        
+          setTimeout(() => {
+            window.location.reload();
+        }, 3000);
+        });
       });
 
     return () => {
@@ -96,6 +124,12 @@ function App() {
     }
   };
 
+  const handleLoginSignup = (values) => {
+    console.log('Received values of form: ', values);
+    // Here, send the username back to the server for either login or signup
+    socket.emit("login-signup", { username: values.username });
+  };
+
   useEffect(() => {
     if (callAccepted) {
       // Create a call to the specified user
@@ -117,13 +151,29 @@ function App() {
 
   return (
     <div>
-      <h2>E Sim</h2>
+      <Modal title="Login / Signup" visible={isModalVisible} footer={null}>
+        <Form onFinish={handleLoginSignup}>
+          <Form.Item
+            name="username"
+            rules={[{ required: true, message: 'Please input your username!' }]}
+          >
+            <Input placeholder="Username" />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit">
+              Login/Signup
+            </Button>
+          </Form.Item>
+        </Form>
+      </Modal>
+      <h2>E-Sim Simulation</h2>
+      <h2>Welcome, {username}</h2>
       <h3>{myId.current}</h3>
       {Object.keys(users).map(
         (socketId) =>
-          users[socketId] !== myId.current && (
-            <button key={socketId} onClick={() => callUser(users[socketId])}>
-              Call {users[socketId]}
+          users[socketId].id !== myId.current && (
+            <button key={socketId} onClick={() => callUser(users[socketId].id)}>
+              Call {users[socketId].username}
             </button>
           )
       )}

@@ -24,7 +24,7 @@ const peerExpressServer = ExpressPeerServer(peerServer, {
   path: "/", // Default path
 });
 
-peerApp.use("/peerjs", peerExpressServer); 
+peerApp.use("/peerjs", peerExpressServer);
 
 // CORS middleware
 app.use(cors());
@@ -36,8 +36,34 @@ io.on("connection", (socket) => {
   console.log("A user connected: " + socket.id);
 
   socket.on("new-user", (userId) => {
-    users[socket.id] = userId;
-    io.emit("all-users", users);
+    users[socket.id] = { id: userId };
+    io.to(getSocketId(userId)).emit("auth", { message: "Please login or register." });
+    console.log(users);
+  });
+
+  socket.on("login-signup", ({ username }) => {
+    // Check if username is already in use
+    console.log(username);
+    const existingUserKey = Object.keys(users).find(key => users[key].username === username);
+
+    console.log("Existing users", existingUserKey)
+    
+    if (existingUserKey) {
+      // Inform the existing user about the disconnection
+      io.to(existingUserKey).emit("disconnected", { message: "You have been logged out because you logged in from another device." });
+      // Disconnect the existing socket
+      io.sockets.sockets.get(existingUserKey).disconnect(true);
+      // Remove the existing user from users object
+      delete users[existingUserKey];
+    }
+    
+    // Assign the new username to the current socket
+    if (users[socket.id]) {
+      users[socket.id].username = username;
+      // Acknowledge new login
+      socket.emit("login-success", { message: "Login successful", username });
+      io.emit("all-users", users);
+    }
   });
 
   socket.on("call-user", ({ userToCall, from }) => {
@@ -47,7 +73,7 @@ io.on("connection", (socket) => {
     });
   });
 
-  socket.on("accept-call", data => {
+  socket.on("accept-call", (data) => {
     io.to(getSocketId(data.to)).emit("call-accepted", {
       from: socket.id,
     });
@@ -59,7 +85,7 @@ io.on("connection", (socket) => {
   });
 
   function getSocketId(userId) {
-    return Object.keys(users).find((key) => users[key] === userId);
+    return Object.keys(users).find((key) => users[key]['id'] === userId);
   }
 });
 
