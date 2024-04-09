@@ -24,7 +24,7 @@ const peerExpressServer = ExpressPeerServer(peerServer, {
   path: "/", // Default path
 });
 
-peerApp.use("/peerjs", peerExpressServer); // Mount PeerJS server on '/peerjs' path
+peerApp.use("/peerjs", peerExpressServer); 
 
 // CORS middleware
 app.use(cors());

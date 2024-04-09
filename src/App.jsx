@@ -86,10 +86,8 @@ function App() {
     };
   }, []);
 
-  // Ensure callUser function uses updated logic to handle two-way communication properly.
   const callUser = (userId) => {
     user_id = userId
-    console.log("CALLING");
     if (myVideoStream.current) {
       socket.emit("call-user", {
         userToCall: userId,
@@ -100,7 +98,6 @@ function App() {
 
   useEffect(() => {
     if (callAccepted) {
-      console.log(user_id)
       // Create a call to the specified user
       const call = peerRef.current.call(user_id, myVideoStream.current);
       call.on("stream", (userStream) => {
